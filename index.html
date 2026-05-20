@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>三視圖進階測驗：空間積木</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #f8fafc; }
+        
+        /* 移除雙擊縮放，優化 iPad 觸控體驗 */
+        .touch-action-manipulation { touch-action: manipulation; }
+        
+        /* 3D Canvas 容器 */
+        #canvas-container { cursor: grab; }
+        #canvas-container:active { cursor: grabbing; }
+
+        /* 格子轉場動畫 */
+        .grid-cell { transition: background-color 0.15s ease, transform 0.1s ease; }
+        .grid-cell:active { transform: scale(0.95); }
+    </style>
+</head>
+<body class="flex flex-col lg:flex-row h-screen font-sans text-slate-800">
+
+    <!-- 左半部：3D 顯示區與視角控制 -->
+    <div class="w-full lg:w-[45%] h-[40vh] lg:h-full flex flex-col relative border-b-4 lg:border-b-0 lg:border-r-4 border-slate-200">
+        <!-- 3D 畫布 -->
+        <div id="canvas-container" class="flex-grow w-full h-full bg-slate-100 relative">
+            <!-- 視角提示標籤 -->
+            <div class="absolute top-3 left-3 bg-white/90 backdrop-blur px-3 py-1.5 rounded shadow-sm text-sm font-bold text-slate-700 pointer-events-none" id="view-label">
+                立體圖 (自由旋轉)
+            </div>
+        </div>
+
+        <!-- 視角輔助按鈕 (放在 3D 畫面下方) -->
+        <div class="bg-white p-3 shadow-md flex justify-center gap-2 z-10 flex-wrap">
+            <button id="btn-view-iso" onclick="flyToView('btn-iso')" class="view-btn px-4 py-2 bg-blue-600 text-white rounded font-medium text-sm shadow hover:bg-blue-700">立體圖</button>
+            <button id="btn-view-top" onclick="flyToView('btn-top')" class="view-btn px-4 py-2 bg-yellow-100 text-yellow-700 border border-yellow-300 rounded font-medium text-sm hover:bg-yellow-200 opacity-50 cursor-not-allowed" disabled>上視角</button>
+            <button id="btn-view-front" onclick="flyToView('btn-front')" class="view-btn px-4 py-2 bg-green-100 text-green-700 border border-green-300 rounded font-medium text-sm hover:bg-green-200 opacity-50 cursor-not-allowed" disabled>前視角</button>
+            <button id="btn-view-right" onclick="flyToView('btn-right')" class="view-btn px-4 py-2 bg-red-100 text-red-700 border border-red-300 rounded font-medium text-sm hover:bg-red-200 opacity-50 cursor-not-allowed" disabled>右視角</button>
+        </div>
+    </div>
+
+    <!-- 右半部：測驗與作答區 -->
+    <div class="w-full lg:w-[55%] h-[60vh] lg:h-full bg-white overflow-y-auto flex flex-col p-4 lg:p-8">
+        
+        <!-- 標題與說明 -->
+        <div class="mb-4">
+            <h1 class="text-2xl lg:text-3xl font-extrabold text-slate-800 mb-2">三視圖進階測驗</h1>
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                <p class="text-sm lg:text-base text-slate-700 font-medium">
+                    🎯 <strong>作答說明：</strong> 觀察左方的立體積木（注意綠色箭頭代表<span class="text-green-600 font-bold">前方</span>）。<br>
+                    請在下方的九宮格中，點擊正確的方塊來繪製對應的三視圖。每個正確的視圖可得 10 分！
+                </p>
+            </div>
+        </div>
+
+        <!-- 作答區 2x2 排列 (上視圖在上、右視圖在右) -->
+        <div class="flex-grow flex items-center justify-center">
+            <div class="grid grid-cols-2 grid-rows-2 gap-x-8 gap-y-6">
+                
+                <!-- 左上：上視圖 -->
+                <div class="flex flex-col items-center">
+                    <h3 class="mb-2 font-bold text-yellow-600 text-lg flex items-center gap-1">
+                        <span class="w-3 h-3 rounded-full bg-yellow-400 inline-block"></span> 上視圖 (Top)
+                    </h3>
+                    <div id="grid-top" class="grid grid-cols-3 gap-1 bg-slate-300 border-4 border-slate-400 p-1 rounded touch-action-manipulation">
+                        <!-- 由 JS 產生 9 個格子 -->
+                    </div>
+                </div>
+
+                <!-- 右上：分數與控制區 -->
+                <div class="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-xl border-2 border-slate-200 shadow-inner w-full">
+                    <div class="text-slate-500 font-bold mb-1">本次得分</div>
+                    <div id="score-display" class="text-5xl font-black text-slate-300 mb-4 transition-colors">--</div>
+                    
+                    <button id="btn-submit" onclick="submitAnswers()" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow-md hover:bg-blue-700 transition active:scale-95 mb-3 text-lg">
+                        送出答案
+                    </button>
+                    <button id="btn-next" onclick="generateRandomCubes()" class="w-full bg-indigo-100 text-indigo-700 border-2 border-indigo-200 font-bold py-2 px-4 rounded-lg hover:bg-indigo-200 transition active:scale-95">
+                        產生下一題
+                    </button>
+                </div>
+
+                <!-- 左下：前視圖 -->
+                <div class="flex flex-col items-center">
+                    <h3 class="mb-2 font-bold text-green-600 text-lg flex items-center gap-1">
+                        <span class="w-3 h-3 rounded-full bg-green-500 inline-block"></span> 前視圖 (Front)
+                    </h3>
+                    <div id="grid-front" class="grid grid-cols-3 gap-1 bg-slate-300 border-4 border-slate-400 p-1 rounded touch-action-manipulation">
+                        <!-- 由 JS 產生 9 個格子 -->
+                    </div>
+                </div>
+
+                <!-- 右下：右視圖 -->
+                <div class="flex flex-col items-center">
+                    <h3 class="mb-2 font-bold text-red-600 text-lg flex items-center gap-1">
+                        <span class="w-3 h-3 rounded-full bg-red-500 inline-block"></span> 右視圖 (Right)
+                    </h3>
+                    <div id="grid-right" class="grid grid-cols-3 gap-1 bg-slate-300 border-4 border-slate-400 p-1 rounded touch-action-manipulation">
+                        <!-- 由 JS 產生 9 個格子 -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 核心測驗資料結構 ---
+        let correctAnswers = { top: [], front: [], right: [] };
+        let userAnswers = { top: Array(9).fill(false), front: Array(9).fill(false), right: Array(9).fill(false) };
+        let isSubmitted = false;
+        let heightMap = new Map();
+
+        // 儲存與讀取特定 (x, z) 座標的高度
+        function setH(x, z, h) { heightMap.set(`${x},${z}`, h); }
+        function getH(x, z) { return heightMap.get(`${x},${z}`) || 0; }
+
+        // --- Three.js 變數與初始化 ---
+        let scene, camera, renderer, controls, cubeGroup;
+        let isAnimating = false;
+        let targetPos = new THREE.Vector3();
+        let targetLookAt = new THREE.Vector3(0, 1.5, 0);
+        const defaultCameraPos = new THREE.Vector3(12, 10, 15);
+        const viewDistance = 18;
+
+        function initThreeJS() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf8fafc);
+
+            camera = new THREE.PerspectiveCamera(35, container.clientWidth / container.clientHeight, 0.1, 100);
+            camera.position.copy(defaultCameraPos);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 5;
+            controls.maxDistance = 30;
+            controls.addEventListener('start', () => {
+                isAnimating = false;
+                document.getElementById('view-label').innerText = '立體圖 (自由旋轉)';
+            });
+
+            // 燈光
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+            dirLight.position.set(10, 20, 15);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+            scene.add(new THREE.DirectionalLight(0xe0e7ff, 0.3).position.set(-10, 5, -10));
+
+            // 底座網格
+            scene.add(new THREE.GridHelper(10, 10, 0x94a3b8, 0xe2e8f0));
+            const baseMesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(3, 3), 
+                new THREE.MeshBasicMaterial({ color: 0xcbd5e1, side: THREE.DoubleSide, transparent: true, opacity: 0.5 })
+            );
+            baseMesh.rotation.x = Math.PI / 2;
+            baseMesh.position.y = 0.01;
+            scene.add(baseMesh);
+
+            // 【新增】明確的前方指示器 (綠色箭頭與文字)
+            const arrowHelper = new THREE.ArrowHelper(
+                new THREE.Vector3(0, 0, -1), // 指向 -Z (朝向中心)
+                new THREE.Vector3(0, -0.2, 3.5), // 放在正面外側
+                1.5, 
+                0x10b981, 
+                0.5, 
+                0.4
+            );
+            scene.add(arrowHelper);
+
+            // 繪製「前方」標籤 Sprite
+            const canvasText = document.createElement('canvas');
+            canvasText.width = 256; canvasText.height = 64;
+            const ctx = canvasText.getContext('2d');
+            ctx.fillStyle = '#10b981'; // 綠色
+            ctx.font = 'bold 40px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('前方 (Front)', 128, 45);
+            const spriteTex = new THREE.CanvasTexture(canvasText);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: spriteTex }));
+            sprite.position.set(0, 0.5, 4); // 浮在箭頭上方
+            sprite.scale.set(2, 0.5, 1);
+            scene.add(sprite);
+
+            cubeGroup = new THREE.Group();
+            scene.add(cubeGroup);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            });
+
+            animate();
+        }
+
+        // --- 產生隨機積木與計算答案 ---
+        const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+        const edgesGeo = new THREE.EdgesGeometry(boxGeo);
+        const edgeMat = new THREE.LineBasicMaterial({ color: 0x334155, linewidth: 2 });
+        // 面材質: 右(紅), 左(灰), 上(黃), 下(灰), 前(綠), 後(灰)
+        const boxMats = [
+            new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.4 }),
+            new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.6 }),
+            new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.4 }),
+            new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.6 }),
+            new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.4 }),
+            new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.6 })
+        ];
+
+        function generateRandomCubes() {
+            // 重置 UI 與狀態
+            isSubmitted = false;
+            userAnswers = { top: Array(9).fill(false), front: Array(9).fill(false), right: Array(9).fill(false) };
+            document.getElementById('btn-submit').disabled = false;
+            document.getElementById('btn-submit').classList.remove('opacity-50', 'cursor-not-allowed');
+            
+            // 鎖定提示按鈕
+            ['btn-view-top', 'btn-view-front', 'btn-view-right'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.disabled = true;
+                    btn.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+            });
+
+            const scoreDisplay = document.getElementById('score-display');
+            scoreDisplay.innerText = '--';
+            scoreDisplay.classList.remove('text-green-600', 'text-blue-600');
+            scoreDisplay.classList.add('text-slate-300');
+            initGrids(); // 重繪空網格
+
+            // 清除舊模型
+            while(cubeGroup.children.length > 0) {
+                cubeGroup.remove(cubeGroup.children[0]);
+            }
+            heightMap.clear();
+
+            let totalCubes = 0;
+            let heights = [];
+            
+            // 隨機產生高度 (10~23個積木)
+            do {
+                totalCubes = 0;
+                heights = [];
+                for(let i = 0; i < 9; i++) {
+                    let h = Math.floor(Math.random() * 4); 
+                    heights.push(h);
+                    totalCubes += h;
+                }
+            } while (totalCubes < 10 || totalCubes > 23);
+
+            // 建立 3D 模型並儲存高度圖
+            let index = 0;
+            for (let x = -1; x <= 1; x++) {
+                for (let z = -1; z <= 1; z++) {
+                    let colHeight = heights[index++];
+                    setH(x, z, colHeight);
+                    for (let y = 0; y < colHeight; y++) {
+                        const mesh = new THREE.Mesh(boxGeo, boxMats);
+                        mesh.position.set(x, y + 0.5, z);
+                        mesh.castShadow = true;
+                        cubeGroup.add(mesh);
+                        const line = new THREE.LineSegments(edgesGeo, edgeMat);
+                        line.position.copy(mesh.position);
+                        cubeGroup.add(line);
+                    }
+                }
+            }
+
+            calculateCorrectAnswers();
+            flyToView('btn-iso'); // 切回立體圖
+        }
+
+        // 根據高度圖計算正確的三視圖陣列 (9宮格 boolean)
+        function calculateCorrectAnswers() {
+            correctAnswers.top = [];
+            correctAnswers.front = [];
+            correctAnswers.right = [];
+
+            for(let row = 0; row < 3; row++) {
+                for(let col = 0; col < 3; col++) {
+                    // 1. 上視圖 (Top)
+                    // row(0~2) 對應 z(-1~1), col(0~2) 對應 x(-1~1)
+                    let z_top = row - 1;
+                    let x_top = col - 1;
+                    correctAnswers.top.push(getH(x_top, z_top) > 0);
+
+                    // 2. 前視圖 (Front)
+                    // row(0~2) 對應高度 y(2~0), col(0~2) 對應 x(-1~1)
+                    let y_front = 2 - row;
+                    let x_front = col - 1;
+                    let hasCubeFront = false;
+                    for(let z = -1; z <= 1; z++) {
+                        if (getH(x_front, z) >= y_front + 1) hasCubeFront = true;
+                    }
+                    correctAnswers.front.push(hasCubeFront);
+
+                    // 3. 右視圖 (Right)
+                    // row(0~2) 對應高度 y(2~0), col(0~2) 對應深度 z(1~-1, 因為是從右看)
+                    let y_right = 2 - row;
+                    let z_right = 1 - col;
+                    let hasCubeRight = false;
+                    for(let x = -1; x <= 1; x++) {
+                        if (getH(x, z_right) >= y_right + 1) hasCubeRight = true;
+                    }
+                    correctAnswers.right.push(hasCubeRight);
+                }
+            }
+        }
+
+        // --- UI 格子與互動邏輯 ---
+        function initGrids() {
+            createGrid('top', 'bg-yellow-400');
+            createGrid('front', 'bg-green-500');
+            createGrid('right', 'bg-red-500');
+        }
+
+        function createGrid(gridId, activeColorClass) {
+            const container = document.getElementById(`grid-${gridId}`);
+            container.innerHTML = '';
+            
+            // iPad 優化尺寸: w-12 h-12 到 w-16 h-16
+            for (let i = 0; i < 9; i++) {
+                const cell = document.createElement('div');
+                cell.className = `grid-cell w-12 h-12 md:w-16 md:h-16 lg:w-20 lg:h-20 bg-white rounded-sm cursor-pointer flex justify-center items-center`;
+                cell.onclick = () => toggleCell(gridId, i, activeColorClass, cell);
+                container.appendChild(cell);
+            }
+        }
+
+        function toggleCell(gridId, index, activeColorClass, cellElement) {
+            if (isSubmitted) return; // 送出後鎖定作答
+            
+            userAnswers[gridId][index] = !userAnswers[gridId][index];
+            if (userAnswers[gridId][index]) {
+                cellElement.classList.remove('bg-white');
+                cellElement.classList.add(activeColorClass);
+            } else {
+                cellElement.classList.remove(activeColorClass);
+                cellElement.classList.add('bg-white');
+            }
+        }
+
+        // --- 批改與計分 ---
+        function submitAnswers() {
+            if (isSubmitted) return;
+            isSubmitted = true;
+            
+            // 停用送出按鈕
+            const submitBtn = document.getElementById('btn-submit');
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            // 解鎖提示按鈕
+            ['btn-view-top', 'btn-view-front', 'btn-view-right'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+            });
+
+            let score = 0;
+            const topPerfect = verifyGrid('top', correctAnswers.top, 'bg-yellow-400');
+            const frontPerfect = verifyGrid('front', correctAnswers.front, 'bg-green-500');
+            const rightPerfect = verifyGrid('right', correctAnswers.right, 'bg-red-500');
+
+            if (topPerfect) score += 10;
+            if (frontPerfect) score += 10;
+            if (rightPerfect) score += 10;
+
+            // 顯示分數動畫與顏色
+            const scoreDisplay = document.getElementById('score-display');
+            scoreDisplay.innerText = score;
+            scoreDisplay.classList.remove('text-slate-300');
+            if (score === 30) {
+                scoreDisplay.classList.add('text-green-600');
+            } else {
+                scoreDisplay.classList.add('text-blue-600');
+            }
+        }
+
+        // 驗證單一九宮格，並加上視覺回饋圖示
+        function verifyGrid(gridId, correctArray, activeClass) {
+            const container = document.getElementById(`grid-${gridId}`);
+            const cells = container.children;
+            let isPerfect = true;
+
+            for (let i = 0; i < 9; i++) {
+                const cell = cells[i];
+                const isSelected = userAnswers[gridId][i];
+                const isCorrect = correctArray[i];
+
+                cell.innerHTML = ''; // 清空內容
+
+                if (isSelected && isCorrect) {
+                    // 正確選取 (打勾)
+                    cell.innerHTML = `<svg class="w-8 h-8 text-white drop-shadow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>`;
+                } else if (!isSelected && isCorrect) {
+                    // 漏選 (補上框線或半透明提示)
+                    cell.classList.add(activeClass, 'opacity-40', 'border-4', 'border-red-500', 'border-dashed');
+                    isPerfect = false;
+                } else if (isSelected && !isCorrect) {
+                    // 錯選 (打叉並標紅)
+                    cell.classList.remove(activeClass);
+                    cell.classList.add('bg-red-800');
+                    cell.innerHTML = `<svg class="w-8 h-8 text-white drop-shadow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"></path></svg>`;
+                    isPerfect = false;
+                }
+            }
+            return isPerfect;
+        }
+
+        // --- 攝影機動畫邏輯 ---
+        const views = {
+            'btn-iso': { pos: defaultCameraPos.clone(), label: '立體圖 (自由旋轉)' },
+            'btn-front': { pos: new THREE.Vector3(0, 1.5, viewDistance), label: '前視圖' },
+            'btn-right': { pos: new THREE.Vector3(viewDistance, 1.5, 0), label: '右視圖' },
+            'btn-top': { pos: new THREE.Vector3(0, viewDistance, 0), label: '上視圖' }
+        };
+
+        function flyToView(viewId) {
+            if (!views[viewId]) return;
+            targetPos.copy(views[viewId].pos);
+            targetLookAt.set(0, viewId === 'btn-top' ? 0 : 1.5, 0);
+            document.getElementById('view-label').innerText = views[viewId].label;
+            isAnimating = true;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (isAnimating) {
+                camera.position.lerp(targetPos, 0.08);
+                controls.target.lerp(targetLookAt, 0.08);
+                if (camera.position.distanceTo(targetPos) < 0.1 && controls.target.distanceTo(targetLookAt) < 0.1) {
+                    camera.position.copy(targetPos);
+                    controls.target.copy(targetLookAt);
+                    isAnimating = false;
+                }
+            }
+            controls.update(); 
+            renderer.render(scene, camera);
+        }
+
+        // --- 程式進入點 ---
+        window.onload = () => {
+            initThreeJS();
+            generateRandomCubes();
+        };
+    </script>
+</body>
+</html>
